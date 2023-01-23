@@ -7,8 +7,8 @@ import dayjs from "dayjs";
 import bcrypt from "bcrypt";
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
 dotenv.config();
 const mongoClient = new MongoClient(process.env.DATABASE_URL);
@@ -19,7 +19,8 @@ mongoClient.connect().then(() => {
   console.log("conectado");
 });
 
-app.post("/sign-up", async (req, res) => {
+app.post("/cadastro", async (req, res) => {
+  console.log(req.body);
   const user = req.body;
   const userJoi = Joi.object({
     name: Joi.string().min(1).required(),
@@ -27,7 +28,6 @@ app.post("/sign-up", async (req, res) => {
     password: Joi.string().min(3).required(),
   });
   const validation = userJoi.validate(user);
-
   if (validation.error) {
     return res.status(422).send("Verifique os dados e tente novamente!");
   }
@@ -39,11 +39,12 @@ app.post("/sign-up", async (req, res) => {
   if (usuarioExiste) {
     return res.status(409).send("usuario já registrado!");
   }
-
+  const hashPass = await bcrypt.hash(req.body?.password, 8);
+  console.log(hashPass);
   const userC = await db.collection("users").insertOne({
     name: req.body?.name,
     email: req.body?.email.toLowerCase(),
-    password: await bcrypt.hash(req.body?.password, 8),
+    password: hashPass,
     createdtime: dayjs().format("DD:MM:YYYY HH:mm:ss"),
     edittime: dayjs().format("DD:MM:YYYY HH:mm:ss"),
   });
@@ -64,26 +65,30 @@ app.post("/login", async (req, res) => {
     password: Joi.string().required(),
   });
   const validation = loginJoy.validate(login);
-  console.log(validation);
   if (validation.error) {
     console.log("error");
     return res.status(422).send("verifique os dados e tente novamente!");
   }
   const userDb = await db.collection("users").findOne({ email: login.email });
-  const comparation = await bcrypt.compare(req.body.password, userDb.password);
-
-  if (userDb && comparation) {
-    const accountObject = await db
-      .collection("accounts")
-      .findOne({ userId: userDb._id });
-    const userObject = {
-      token: userDb._id,
-      name: userDb.name,
-      email: userDb.email,
-      saldo: accountObject.saldo.toFixed(2).replace(".", ","),
-    };
-    res.status(200).send(userObject);
-  } else {
+  if (userDb) {
+    const comparation = await bcrypt.compare(
+      req.body.password,
+      userDb.password
+    );
+    if (userDb && comparation) {
+      const accountObject = await db
+        .collection("accounts")
+        .findOne({ userId: userDb._id });
+      const userObject = {
+        token: userDb._id,
+        name: userDb.name,
+        email: userDb.email,
+        saldo: accountObject.saldo,
+      };
+      res.status(200).send(userObject);
+    }
+    return res.sendStatus(404)
+  }else {
     res.sendStatus(404);
   }
 });
@@ -107,11 +112,10 @@ app.post("/extracts", async (req, res) => {
       .collection("accounts")
       .findOne({ userId: objectIdUser });
 
-    console.log(userAccount);
 
     await db.collection("extracts").insertOne({
       accountId: userAccount._id,
-      value: req.body?.value,
+      value: parseInt(req.body?.value),
       description: req.body?.description,
       type: req.body?.type,
       date: dayjs().format("DD/MM"),
@@ -121,7 +125,7 @@ app.post("/extracts", async (req, res) => {
         .collection("accounts")
         .updateOne(
           { _id: userAccount._id },
-          { $set: { saldo: userAccount.saldo + req.body?.value } }
+          { $set: { saldo: userAccount.saldo + parseInt(req.body?.value) } }
         );
       return res.sendStatus(201);
     }
@@ -149,7 +153,7 @@ app.get("/extracts", async (req, res) => {
       .toArray();
 
     const returnObject = extractsUser.map((e) => ({
-      value: e.value.toFixed(2).replace(".", ","),
+      value: e.value.toFixed(2).replace(".", ",").replace("-",""),
       description: e.description,
       type: e.type,
       date: e.date,
@@ -162,14 +166,16 @@ app.get("/extracts", async (req, res) => {
 app.get("/saldo", async (req, res) => {
   const objectIdUser = new ObjectId(req.headers?.authorization);
   const userExist = await db.collection("users").findOne({ _id: objectIdUser });
-  console.log(userExist);
   if (userExist) {
     const data = await db
       .collection("accounts")
       .findOne({ userId: objectIdUser });
-    const saldo = data.saldo.toFixed(2).replace(".", ",");
+    const saldo = data.saldo;
     return res.send(`${saldo}`);
   }
   return res.sendStatus(404);
+});
+app.get("/teste", (req, res) => {
+  res.send("testando");
 });
 app.listen(5000, () => console.log("server open"));
